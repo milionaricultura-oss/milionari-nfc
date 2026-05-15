@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
   const { code } = req.query;
 
   if (!code) {
-    return res.status(400).json({ error: 'Código requerido' });
+    return res.redirect('https://milionarihats.com');
   }
 
   try {
@@ -27,49 +27,14 @@ module.exports = async (req, res) => {
       .single();
 
     if (error || !data) {
-      return res.status(404).json({
-        valid: false,
-        status: 'invalid',
-        message: 'Código no encontrado. Esta gorra podría ser falsa.'
-      });
+      return res.redirect('https://milionarihats.com');
     }
 
-    if (data.activated) {
-      return res.status(200).json({
-        valid: true,
-        status: 'already_activated',
-        message: 'Este chip ya fue registrado anteriormente.',
-        model: data.model,
-        unit_number: data.unit_number,
-        total_units: data.total_units,
-        activated_at: data.activated_at,
-        scan_count: data.scan_count + 1,
-        page_url: data.page_url
-      });
-    }
-
-    const now = new Date().toISOString();
-    const { error: updateError } = await supabase
-      .from('nfc_codes')
-      .update({ activated: true, activated_at: now, scan_count: 1 })
-      .eq('code', code.toUpperCase());
-
-    if (updateError) throw updateError;
-
-    return res.status(200).json({
-      valid: true,
-      status: 'first_activation',
-      message: '¡Primera activación exitosa!',
-      model: data.model,
-      unit_number: data.unit_number,
-      total_units: data.total_units,
-      activated_at: now,
-      scan_count: 1,
-      page_url: data.page_url
-    });
+    // Redirigir a la página de Shopify con el código
+    return res.redirect(`${data.page_url}?code=${code.toUpperCase()}&status=${data.activated ? 'registered' : 'new'}`);
 
   } catch (err) {
     console.error('Error:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+    return res.redirect('https://milionarihats.com');
   }
 };

@@ -54,7 +54,7 @@ module.exports = async (req, res) => {
 
     if (updateError) throw updateError;
 
-    // Sumar 100 puntos si el usuario existe
+    // Buscar usuario y sumar puntos
     const { data: user } = await supabase
       .from('milionari_users')
       .select('*')
@@ -75,6 +75,32 @@ module.exports = async (req, res) => {
           concepto: 'Registro gorra: ' + data.model + ' #' + data.unit_number,
           puntos: 100
         });
+    }
+
+    // Enviar notificaciones por correo
+    try {
+      const baseUrl = process.env.VERCEL_URL
+        ? 'https://' + process.env.VERCEL_URL
+        : 'https://verificar.milionarihats.com';
+
+      fetch(baseUrl + '/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'registro_gorra',
+          data: {
+            code: code.toUpperCase(),
+            model: data.model,
+            unit_number: data.unit_number,
+            total_units: data.total_units,
+            owner_name: owner_name.trim(),
+            owner_cedula: owner_cedula.trim(),
+            owner_email: user ? user.correo : null
+          }
+        })
+      });
+    } catch(emailErr) {
+      console.log('Email error (no crítico):', emailErr);
     }
 
     return res.status(200).json({

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "API de verificación NFC para Milionari Hats",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "resend": "^3.2.0"
   }
 }

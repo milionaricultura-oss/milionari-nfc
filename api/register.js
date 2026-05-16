@@ -54,6 +54,29 @@ module.exports = async (req, res) => {
 
     if (updateError) throw updateError;
 
+    // Sumar 100 puntos si el usuario existe
+    const { data: user } = await supabase
+      .from('milionari_users')
+      .select('*')
+      .eq('cedula', owner_cedula.trim())
+      .single();
+
+    if (user) {
+      await supabase
+        .from('milionari_users')
+        .update({ puntos: user.puntos + 100 })
+        .eq('cedula', owner_cedula.trim());
+
+      await supabase
+        .from('milionari_puntos')
+        .insert({
+          user_id: user.id,
+          cedula: owner_cedula.trim(),
+          concepto: 'Registro gorra: ' + data.model + ' #' + data.unit_number,
+          puntos: 100
+        });
+    }
+
     return res.status(200).json({
       success: true,
       message: '¡Gorra registrada exitosamente!',
@@ -61,7 +84,9 @@ module.exports = async (req, res) => {
       unit_number: data.unit_number,
       total_units: data.total_units,
       owner_name: owner_name.trim(),
-      activated_at: now
+      activated_at: now,
+      puntos_ganados: user ? 100 : 0,
+      tiene_cuenta: !!user
     });
 
   } catch (err) {

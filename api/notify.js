@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
     if (type === 'registro_gorra') {
       // Email al admin
       await resend.emails.send({
-        from: 'Milionari Hats <onboarding@resend.dev>',
+        from: 'Milionari Hats <noreply@milionarihats.com>',
         to: 'milionaricultura@gmail.com',
         subject: '🎩 Nueva gorra registrada — ' + data.model + ' #' + data.unit_number,
         html: `
@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
       // Email al cliente si tiene correo
       if (data.owner_email) {
         await resend.emails.send({
-          from: 'Milionari Hats <onboarding@resend.dev>',
+          from: 'Milionari Hats <noreply@milionarihats.com>',
           to: data.owner_email,
           subject: '✦ Tu gorra ' + data.model + ' está registrada',
           html: `

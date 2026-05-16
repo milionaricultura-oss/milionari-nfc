@@ -79,11 +79,7 @@ module.exports = async (req, res) => {
 
     // Enviar notificaciones por correo
     try {
-      const baseUrl = process.env.VERCEL_URL
-        ? 'https://' + process.env.VERCEL_URL
-        : 'https://verificar.milionarihats.com';
-
-      fetch(baseUrl + '/api/notify', {
+      await fetch('https://verificar.milionarihats.com/api/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

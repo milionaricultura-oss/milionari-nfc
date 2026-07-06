@@ -30,9 +30,8 @@ module.exports = async (req, res) => {
       return res.redirect('https://milionarihats.com');
     }
 
-    // Redirigir a la página de Shopify con el código
-    return res.redirect(`${data.page_url}?code=${code.toUpperCase()}&status=${data.activated ? 'registered' : 'new'}`);
-
+    // Redirigir a la página de Shopify con el código, número de unidad y total
+    return res.redirect(`${data.page_url}?code=${code.toUpperCase()}&status=${data.activated ? 'registered' : 'new'}&unit=${data.unit_number}&total=${data.total_units}`);
   } catch (err) {
     console.error('Error:', err);
     return res.redirect('https://milionarihats.com');

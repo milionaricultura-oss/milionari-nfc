@@ -31,8 +31,36 @@ module.exports = async (req, res) => {
       return res.redirect('https://milionarihats.com');
     }
 
-    // Redirigir a la página de Shopify con el código, número de unidad y total
-    return res.redirect(`${data.page_url}?code=${code.toUpperCase()}&status=${data.activated ? 'registered' : 'new'}&unit=${data.unit_number}&total=${data.total_units}`);
+    // Construir nombre parcial (primer nombre + inicial del apellido)
+    let ownerParcial = '';
+    if (data.owner_name) {
+      const partes = data.owner_name.trim().split(/\s+/);
+      const primerNombre = partes[0] || '';
+      const inicialApellido = partes.length > 1 ? partes[partes.length - 1].charAt(0).toUpperCase() + '.' : '';
+      ownerParcial = (primerNombre + ' ' + inicialApellido).trim();
+    }
+
+    // Formatear fecha de registro (dd mmm yyyy en espanol)
+    let fechaReg = '';
+    if (data.activated_at) {
+      const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+      const f = new Date(data.activated_at);
+      if (!isNaN(f)) {
+        fechaReg = f.getDate() + ' ' + meses[f.getMonth()] + ' ' + f.getFullYear();
+      }
+    }
+
+    // Redirigir a la pagina de Shopify con todos los datos
+    const params = new URLSearchParams({
+      code: code.toUpperCase(),
+      status: data.activated ? 'registered' : 'new',
+      unit: data.unit_number,
+      total: data.total_units
+    });
+    if (ownerParcial) params.set('owner', ownerParcial);
+    if (fechaReg) params.set('fecha', fechaReg);
+
+    return res.redirect(`${data.page_url}?${params.toString()}`);
   } catch (err) {
     console.error('Error:', err);
     return res.redirect('https://milionarihats.com');

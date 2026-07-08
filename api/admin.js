@@ -13,6 +13,12 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // ── Verificacion de contrasena de admin ──
+  const { password } = req.body || {};
+  if (!password || password !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'No autorizado' });
+  }
+
   try {
     // Gorras
     const { data: gorras } = await supabase
@@ -57,7 +63,6 @@ module.exports = async (req, res) => {
         gorrasCount[g.owner_cedula] = (gorrasCount[g.owner_cedula] || 0) + 1;
       }
     });
-
     var clientesConGorras = (clientes || []).map(function(c) {
       return Object.assign({}, c, { gorras_count: gorrasCount[c.cedula] || 0 });
     });
@@ -79,7 +84,6 @@ module.exports = async (req, res) => {
         canjes: (canjesRaw || []).length
       }
     });
-
   } catch (err) {
     console.error('Error:', err);
     return res.status(500).json({ error: 'Error interno del servidor' });

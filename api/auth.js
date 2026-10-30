@@ -1,47 +1,49 @@
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { createToken, hashPassword, checkPassword } = require('../lib/session');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+function publicUser(u) {
+  return { id: u.id, nombre: u.nombre, correo: u.correo, cedula: u.cedula, puntos: u.puntos };
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, nombre, cedula, correo, password } = req.body;
+  const { action, nombre, cedula, correo, password } = req.body || {};
 
   // REGISTRO
   if (action === 'register') {
     if (!nombre || !cedula || !correo || !password) {
       return res.status(400).json({ error: 'Todos los campos son requeridos' });
     }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const ced = String(cedula).trim();
+    const mail = String(correo).trim().toLowerCase();
 
-    const { data: existing } = await supabase
-      .from('milionari_users')
-      .select('id')
-      .or(`cedula.eq.${cedula},correo.eq.${correo}`)
-      .single();
-
-    if (existing) {
+    // Dos consultas separadas (antes se armaba un filtro con el texto del usuario).
+    const { data: porCedula } = await supabase.from('milionari_users').select('id').eq('cedula', ced).maybeSingle();
+    const { data: porCorreo } = await supabase.from('milionari_users').select('id').eq('correo', mail).maybeSingle();
+    if (porCedula || porCorreo) {
       return res.status(400).json({ error: 'Ya existe una cuenta con ese correo o cédula' });
     }
 
     const { data, error } = await supabase
       .from('milionari_users')
       .insert({
-        nombre: nombre.trim(),
-        cedula: cedula.trim(),
-        correo: correo.trim().toLowerCase(),
+        nombre: String(nombre).trim(),
+        cedula: ced,
+        correo: mail,
         password_hash: hashPassword(password),
         puntos: 0
       })
@@ -53,7 +55,8 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: '¡Cuenta creada exitosamente!',
-      user: { id: data.id, nombre: data.nombre, correo: data.correo, puntos: data.puntos }
+      user: publicUser(data),
+      token: createToken(data)
     });
   }
 
@@ -63,20 +66,26 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Correo y contraseña requeridos' });
     }
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('milionari_users')
       .select('*')
-      .eq('correo', correo.trim().toLowerCase())
-      .eq('password_hash', hashPassword(password))
-      .single();
+      .eq('correo', String(correo).trim().toLowerCase())
+      .maybeSingle();
 
-    if (error || !data) {
+    const check = data ? checkPassword(password, data.password_hash) : { ok: false };
+    if (!check.ok) {
       return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+    }
+
+    // Contraseña antigua (SHA-256 sin sal): se actualiza al formato seguro.
+    if (check.needsUpgrade) {
+      await supabase.from('milionari_users').update({ password_hash: hashPassword(password) }).eq('id', data.id);
     }
 
     return res.status(200).json({
       success: true,
-      user: { id: data.id, nombre: data.nombre, correo: data.correo, cedula: data.cedula, puntos: data.puntos }
+      user: publicUser(data),
+      token: createToken(data)
     });
   }
 

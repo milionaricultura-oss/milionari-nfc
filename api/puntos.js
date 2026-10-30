@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { verifyToken, tokenFromRequest } = require('../lib/session');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -8,11 +9,18 @@ const supabase = createClient(
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { action, cedula, producto_id } = req.method === 'GET' ? req.query : req.body;
+  const { action, producto_id } = (req.method === 'GET' ? req.query : req.body) || {};
+
+  // Sesión obligatoria: la cédula sale del token firmado, nunca de lo que mande el navegador.
+  const session = verifyToken(tokenFromRequest(req));
+  if (!session) {
+    return res.status(401).json({ success: false, error: 'Tu sesión venció. Inicia sesión de nuevo.', session_expired: true });
+  }
+  const cedula = session.ced;
 
   // VER PUNTOS Y PERFIL
   if (action === 'perfil') {
@@ -48,8 +56,8 @@ module.exports = async (req, res) => {
 
   // CANJEAR PUNTOS
   if (action === 'canjear') {
-    if (!cedula || !producto_id) {
-      return res.status(400).json({ error: 'Cédula y producto requeridos' });
+    if (!producto_id) {
+      return res.status(400).json({ error: 'Producto requerido' });
     }
 
     const { data: user } = await supabase

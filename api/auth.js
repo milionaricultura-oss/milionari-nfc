@@ -1,5 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
-const { createToken, hashPassword, checkPassword } = require('../lib/session');
+const { createToken, hashPassword, checkPassword, createResetToken, readResetToken, passwordFingerprint } = require('../lib/session');
+const { sendRecuperarContrasena } = require('../lib/mail');
+
+const RESET_PAGE = 'https://milionarihats.com/pages/mi-cuenta-milionari';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,7 +21,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, nombre, cedula, correo, password } = req.body || {};
+  const { action, nombre, cedula, correo, password, reset_token } = req.body || {};
 
   // REGISTRO
   if (action === 'register') {
@@ -86,6 +89,53 @@ module.exports = async (req, res) => {
       success: true,
       user: publicUser(data),
       token: createToken(data)
+    });
+  }
+
+  // OLVIDÉ MI CONTRASEÑA: envía un enlace al correo.
+  // Siempre responde lo mismo, exista o no la cuenta, para no revelar qué correos están registrados.
+  if (action === 'forgot') {
+    const okMsg = { success: true, message: 'Si ese correo tiene una cuenta, te enviamos un enlace para crear una nueva contraseña.' };
+    if (!correo) return res.status(400).json({ error: 'Escribe tu correo' });
+    try {
+      const { data } = await supabase
+        .from('milionari_users')
+        .select('id, nombre, correo, password_hash')
+        .eq('correo', String(correo).trim().toLowerCase())
+        .maybeSingle();
+      if (data) {
+        const link = RESET_PAGE + '?reset=' + encodeURIComponent(createResetToken(data));
+        await sendRecuperarContrasena(data.correo, data.nombre, link);
+      }
+    } catch (e) {
+      console.error('Error en forgot:', e);
+    }
+    return res.status(200).json(okMsg);
+  }
+
+  // CREAR NUEVA CONTRASEÑA con el enlace del correo.
+  if (action === 'reset') {
+    const bad = { success: false, error: 'El enlace venció o ya se usó. Pide uno nuevo.' };
+    if (!reset_token || !password) return res.status(400).json({ error: 'Faltan datos' });
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const info = readResetToken(reset_token);
+    if (!info) return res.status(400).json(bad);
+
+    const { data: user } = await supabase.from('milionari_users').select('*').eq('id', info.uid).maybeSingle();
+    if (!user || passwordFingerprint(user.password_hash) !== info.fp) return res.status(400).json(bad);
+
+    const nuevo = hashPassword(password);
+    const { error } = await supabase.from('milionari_users').update({ password_hash: nuevo }).eq('id', user.id);
+    if (error) return res.status(500).json({ error: 'No se pudo guardar la contraseña' });
+
+    user.password_hash = nuevo;
+    return res.status(200).json({
+      success: true,
+      message: 'Contraseña actualizada.',
+      user: publicUser(user),
+      token: createToken(user)
     });
   }
 

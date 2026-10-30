@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { createToken, hashPassword, checkPassword, createResetToken, readResetToken, passwordFingerprint } = require('../lib/session');
 const { sendRecuperarContrasena } = require('../lib/mail');
+const { acreditarGorrasPendientes } = require('../lib/gorras');
 
 const RESET_PAGE = 'https://milionarihats.com/pages/mi-cuenta-milionari';
 
@@ -31,7 +32,7 @@ module.exports = async (req, res) => {
     if (String(password).length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
-    const ced = String(cedula).trim();
+    const ced = String(cedula).replace(/[\s.]/g, '');
     const mail = String(correo).trim().toLowerCase();
 
     // Dos consultas separadas (antes se armaba un filtro con el texto del usuario).
@@ -55,9 +56,16 @@ module.exports = async (req, res) => {
 
     if (error) return res.status(500).json({ error: 'Error al crear cuenta' });
 
+    // Si esta cédula ya tenía gorras registradas sin cuenta, recibe ahora sus puntos.
+    let pendientes = { gorras: 0, puntos: 0 };
+    try { pendientes = await acreditarGorrasPendientes(supabase, data); } catch (e) { console.error('Puntos pendientes:', e); }
+
     return res.status(200).json({
       success: true,
-      message: '¡Cuenta creada exitosamente!',
+      message: pendientes.puntos
+        ? '¡Cuenta creada! Sumamos ' + pendientes.puntos + ' puntos por tus gorras registradas.'
+        : '¡Cuenta creada exitosamente!',
+      puntos_acreditados: pendientes.puntos,
       user: publicUser(data),
       token: createToken(data)
     });

@@ -1,9 +1,29 @@
+// Verificación de gorras.
+//
+// 1) El chip abre:  /api/verify?code=XXX   (o la ruta corta /v/XXX)
+//    -> suma 1 al contador de escaneos y lleva a la página del modelo SOLO con el código:
+//       https://milionarihats.com/pages/<pagina-del-modelo>?code=XXX
+//
+// 2) Esa página pregunta aquí qué dice la base de datos:
+//    /api/verify?code=XXX&format=json
+//    -> { valid, code, model, unit_number, total_units, activated, activated_at, owner, scan_count, page_url }
+//
+// La página nunca confía en datos escritos en el enlace: todo lo que muestra sale de esta respuesta.
 const { createClient } = require('@supabase/supabase-js');
+const { normalizarCodigo, nombreParcial } = require('../lib/gorras');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+const HOME = 'https://milionarihats.com';
+// Página a la que va un código que no existe: muestra "No reconocida".
+const NO_RECONOCIDA = process.env.VERIFY_NOT_FOUND_PAGE || 'https://milionarihats.com/pages/verificacion-benjamin-crystal-1';
+
+function conCodigo(url, code) {
+  return url + (url.includes('?') ? '&' : '?') + 'code=' + encodeURIComponent(code);
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,55 +34,50 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { code } = req.query;
+  const json = req.query.format === 'json';
+  const code = normalizarCodigo(req.query.code);
 
   if (!code) {
-    return res.redirect('https://milionarihats.com');
+    return json ? res.status(200).json({ valid: false }) : res.redirect(HOME);
   }
 
   try {
     const { data, error } = await supabase
       .from('nfc_codes')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .single();
+      .select('code, model, unit_number, total_units, activated, activated_at, owner_name, scan_count, page_url')
+      .eq('code', code)
+      .maybeSingle();
 
-    if (error || !data) {
-      return res.redirect('https://milionarihats.com');
+    if (error) throw error;
+
+    // ── Consulta de la página ──
+    if (json) {
+      if (!data) return res.status(200).json({ valid: false, code });
+      return res.status(200).json({
+        valid: true,
+        code: data.code,
+        model: data.model,
+        unit_number: data.unit_number,
+        total_units: data.total_units,
+        activated: !!data.activated,
+        activated_at: data.activated ? data.activated_at : null,
+        owner: data.activated ? nombreParcial(data.owner_name) : '',
+        scan_count: data.scan_count || 0,
+        page_url: data.page_url
+      });
     }
 
-    // Construir nombre parcial (primer nombre + inicial del apellido)
-    let ownerParcial = '';
-    if (data.owner_name) {
-      const partes = data.owner_name.trim().split(/\s+/);
-      const primerNombre = partes[0] || '';
-      const inicialApellido = partes.length > 1 ? partes[partes.length - 1].charAt(0).toUpperCase() + '.' : '';
-      ownerParcial = (primerNombre + ' ' + inicialApellido).trim();
-    }
+    // ── Escaneo del chip ──
+    if (!data) return res.redirect(conCodigo(NO_RECONOCIDA, code));
 
-    // Formatear fecha de registro (dd mmm yyyy en espanol)
-    let fechaReg = '';
-    if (data.activated_at) {
-      const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-      const f = new Date(data.activated_at);
-      if (!isNaN(f)) {
-        fechaReg = f.getDate() + ' ' + meses[f.getMonth()] + ' ' + f.getFullYear();
-      }
-    }
+    await supabase
+      .from('nfc_codes')
+      .update({ scan_count: (data.scan_count || 0) + 1 })
+      .eq('code', code);
 
-    // Redirigir a la pagina de Shopify con todos los datos
-    const params = new URLSearchParams({
-      code: code.toUpperCase(),
-      status: data.activated ? 'registered' : 'new',
-      unit: data.unit_number,
-      total: data.total_units
-    });
-    if (ownerParcial) params.set('owner', ownerParcial);
-    if (fechaReg) params.set('fecha', fechaReg);
-
-    return res.redirect(`${data.page_url}?${params.toString()}`);
+    return res.redirect(conCodigo(data.page_url || NO_RECONOCIDA, code));
   } catch (err) {
-    console.error('Error:', err);
-    return res.redirect('https://milionarihats.com');
+    console.error('Error en verify:', err);
+    return json ? res.status(500).json({ error: 'No se pudo verificar' }) : res.redirect(HOME);
   }
 };

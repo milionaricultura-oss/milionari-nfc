@@ -1,4 +1,11 @@
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+
+function igual(a, b) {
+  const x = crypto.createHash('sha256').update(a).digest();
+  const y = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(x, y);
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -15,7 +22,7 @@ module.exports = async (req, res) => {
 
   // ── Verificacion de contrasena de admin ──
   const { password } = req.body || {};
-  if (!password || password !== process.env.ADMIN_PASSWORD) {
+  if (!password || !process.env.ADMIN_PASSWORD || !igual(String(password), process.env.ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, error: 'No autorizado' });
   }
 
@@ -63,9 +70,20 @@ module.exports = async (req, res) => {
         gorrasCount[g.owner_cedula] = (gorrasCount[g.owner_cedula] || 0) + 1;
       }
     });
+    // Nunca se envían las contraseñas (ni cifradas) al navegador.
     var clientesConGorras = (clientes || []).map(function(c) {
-      return Object.assign({}, c, { gorras_count: gorrasCount[c.cedula] || 0 });
+      var limpio = Object.assign({}, c, { gorras_count: gorrasCount[c.cedula] || 0 });
+      delete limpio.password_hash;
+      return limpio;
     });
+
+    // ¿El dueño de cada gorra tiene cuenta en Mi Cuenta?
+    var cedulasConCuenta = {};
+    (clientes || []).forEach(function(c) { if (c.cedula) cedulasConCuenta[c.cedula] = true; });
+    var gorrasConCuenta = (gorras || []).map(function(g) {
+      return Object.assign({}, g, { tiene_cuenta: !!(g.owner_cedula && cedulasConCuenta[g.owner_cedula]) });
+    });
+    var sinCuenta = gorrasConCuenta.filter(function(g) { return g.activated && !g.tiene_cuenta; }).length;
 
     // Stats
     var gorrasRegistradas = (gorras || []).filter(function(g) { return g.activated; }).length;
@@ -73,7 +91,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      gorras: gorras || [],
+      gorras: gorrasConCuenta,
       clientes: clientesConGorras,
       puntos: puntos || [],
       canjes: canjes,
@@ -81,7 +99,8 @@ module.exports = async (req, res) => {
         gorras_registradas: gorrasRegistradas,
         clientes: (clientes || []).length,
         puntos_totales: puntosTotal,
-        canjes: (canjesRaw || []).length
+        canjes: (canjesRaw || []).length,
+        duenos_sin_cuenta: sinCuenta
       }
     });
   } catch (err) {

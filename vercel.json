@@ -8,6 +8,10 @@
   },
   "routes": [
     {
+      "src": "/v/([A-Za-z0-9-]+)/?",
+      "dest": "/api/verify?code=$1"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/$1"
     }

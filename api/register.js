@@ -1,13 +1,17 @@
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { hashPassword } = require('../lib/session');
+const { sendRegistroGorra } = require('../lib/mail');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+// "Felix Andrés Morón" -> "Felix M." (no se expone el nombre completo del dueño)
+function nombreParcial(n) {
+  const p = String(n || '').trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return '';
+  return p.length > 1 ? p[0] + ' ' + p[p.length - 1].charAt(0).toUpperCase() + '.' : p[0];
 }
 
 module.exports = async (req, res) => {
@@ -40,7 +44,7 @@ module.exports = async (req, res) => {
         success: false,
         already_registered: true,
         message: 'Esta gorra ya fue registrada.',
-        owner_name: data.owner_name,
+        owner_name: nombreParcial(data.owner_name),
         activated_at: data.activated_at
       });
     }
@@ -130,23 +134,16 @@ module.exports = async (req, res) => {
       puntosGanados = 100;
     }
 
-    // 5) Enviar notificacion por correo (no critico)
+    // 5) Enviar notificacion por correo (no critico) — directo, sin pasar por la API publica
     try {
-      await fetch('https://verificar.milionarihats.com/api/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'registro_gorra',
-          data: {
-            code: code.toUpperCase(),
-            model: data.model,
-            unit_number: data.unit_number,
-            total_units: data.total_units,
-            owner_name: nombre,
-            owner_cedula: cedula,
-            owner_email: user ? user.correo : (owner_email || null)
-          }
-        })
+      await sendRegistroGorra({
+        code: code.toUpperCase(),
+        model: data.model,
+        unit_number: data.unit_number,
+        total_units: data.total_units,
+        owner_name: nombre,
+        owner_cedula: cedula,
+        owner_email: user ? user.correo : (owner_email || null)
       });
     } catch (emailErr) {
       console.log('Email error (no crítico):', emailErr);

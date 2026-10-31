@@ -46,11 +46,33 @@ module.exports = async (req, res) => {
       .eq('activo', true)
       .order('puntos_requeridos', { ascending: true });
 
+    // Sus gorras registradas y sus canjes (para "Mis gorras" y el estado de cada canje)
+    const { data: gorras } = await supabase
+      .from('nfc_codes')
+      .select('code, model, unit_number, total_units, activated_at, scan_count, page_url')
+      .eq('owner_cedula', cedula)
+      .eq('activated', true)
+      .order('activated_at', { ascending: true });
+
+    const { data: canjesRaw } = await supabase
+      .from('milionari_canjes')
+      .select('id, estado, puntos_usados, created_at, milionari_productos(nombre)')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
     return res.status(200).json({
       success: true,
       user: { nombre: user.nombre, correo: user.correo, cedula: user.cedula, puntos: user.puntos },
       historial: historial || [],
-      productos: productos || []
+      productos: productos || [],
+      gorras: gorras || [],
+      canjes: (canjesRaw || []).map(c => ({
+        id: c.id,
+        estado: c.estado === 'entregado' ? 'entregado' : 'pendiente',
+        puntos_usados: c.puntos_usados,
+        created_at: c.created_at,
+        producto: c.milionari_productos ? c.milionari_productos.nombre : '—'
+      }))
     });
   }
 

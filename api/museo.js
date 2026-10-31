@@ -5,6 +5,10 @@
 //        -> entra si el cliente tiene al menos una gorra registrada a su nombre.
 //   POST {action:'vip', pin}      -> entra si el PIN coincide con VIP_PIN.
 //   POST {action:'ceo', password} -> entra como CEO si coincide con CEO_PASSWORD.
+//   POST {action:'slot'}          -> la máquina de la suerte: el SERVIDOR decide si ganas,
+//        cuenta las jugadas del día y entrega un código de descuento único de un solo uso
+//        (tabla milionari_slot_codigos). Variables: SLOT_WIN_CHANCE (% , por defecto 2),
+//        SLOT_MAX_PLAYS (por día, por defecto 7), SLOT_DISCOUNT_PCT (por defecto 20).
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { verifyToken, tokenFromRequest } = require('../lib/session');
@@ -18,6 +22,20 @@ function igual(a, b) {
   return crypto.timingSafeEqual(x, y);
 }
 const espera = ms => new Promise(r => setTimeout(r, ms));
+const num = (v, d) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
+
+// Identifica al jugador sin guardar datos personales: la cédula (si tiene sesión de Mi Cuenta)
+// o una huella de su conexión, ambas pasadas por un hash con clave.
+function jugador(req, ses) {
+  const sal = process.env.SESSION_SECRET || process.env.SUPABASE_SERVICE_KEY || 'milionari';
+  const base = ses && ses.ced
+    ? 'ced:' + ses.ced
+    : 'ip:' + String((req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.headers['x-real-ip'] || '') + '|' + String(req.headers['user-agent'] || '').slice(0, 120);
+  return crypto.createHmac('sha256', sal).update(base).digest('hex').slice(0, 32);
+}
+function hoyBogota() {
+  return new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,6 +60,39 @@ module.exports = async (req, res) => {
       if (pin && igual(String(pin).trim(), process.env.VIP_PIN)) return res.status(200).json({ success: true, via: 'pin' });
       if (pin) await espera(700);
       return res.status(200).json({ success: false, error: pin ? 'PIN incorrecto' : 'Necesitas un PIN o iniciar sesión' });
+    }
+
+    if (action === 'slot') {
+      const ses = verifyToken(tokenFromRequest(req));
+      const quien = jugador(req, ses);
+      const dia = hoyBogota();
+      const max = Math.max(1, Math.round(num(process.env.SLOT_MAX_PLAYS, 7)));
+      const prob = Math.min(100, Math.max(0, num(process.env.SLOT_WIN_CHANCE, 2)));
+      const pct = Math.round(num(process.env.SLOT_DISCOUNT_PCT, 20));
+
+      const { data: fila } = await supabase.from('milionari_slot_jugadas').select('*').eq('quien', quien).eq('dia', dia).maybeSingle();
+      const jugadas = fila ? fila.jugadas : 0;
+      if (jugadas >= max) return res.status(200).json({ success: false, limite: true, error: 'Ya usaste tus ' + max + ' jugadas de hoy. Vuelve mañana.' });
+
+      // ¿Ya ganó alguna vez? Un premio por persona.
+      const { data: yaGano } = await supabase.from('milionari_slot_codigos').select('code').eq('quien', quien).limit(1);
+      let gano = !(yaGano && yaGano.length) && (crypto.randomInt(0, 10000) < prob * 100);
+      let code = null;
+      if (gano) {
+        const { data: libres } = await supabase.from('milionari_slot_codigos').select('code').is('entregado_at', null).limit(5);
+        for (const c of (libres || [])) {
+          const { data: tomado } = await supabase.from('milionari_slot_codigos')
+            .update({ entregado_at: new Date().toISOString(), quien })
+            .eq('code', c.code).is('entregado_at', null).select('code');
+          if (tomado && tomado.length) { code = tomado[0].code; break; }
+        }
+        if (!code) gano = false; // se acabaron los códigos: cuenta como no ganador
+      }
+
+      if (fila) await supabase.from('milionari_slot_jugadas').update({ jugadas: jugadas + 1 }).eq('quien', quien).eq('dia', dia);
+      else await supabase.from('milionari_slot_jugadas').insert({ quien, dia, jugadas: 1 });
+
+      return res.status(200).json({ success: true, gano, code, pct: gano ? pct : undefined, restantes: max - jugadas - 1 });
     }
 
     if (action === 'ceo') {

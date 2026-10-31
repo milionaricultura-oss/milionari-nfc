@@ -100,7 +100,7 @@ module.exports = async (req, res) => {
         user_id: user.id,
         producto_id: producto.id,
         puntos_usados: producto.puntos_requeridos,
-        estado: 'completado'
+        estado: 'pendiente' // el admin lo marca 'entregado' desde el panel
       });
 
     // Registrar en historial

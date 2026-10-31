@@ -4,7 +4,8 @@
 //   POST {action:'vip'}  + Authorization: Bearer <sesión de Mi Cuenta>
 //        -> entra si el cliente tiene al menos una gorra registrada a su nombre.
 //   POST {action:'vip', pin}      -> entra si el PIN coincide con VIP_PIN.
-//   POST {action:'ceo', password} -> entra como CEO si coincide con CEO_PASSWORD.
+//   POST {action:'ceo', password, uid?} -> entra como CEO si coincide con CEO_PASSWORD; con uid
+//        lo marca en Firebase (museo/ceo/<uid>) usando FIREBASE_DB_URL y FIREBASE_DB_SECRET.
 //   POST {action:'slot'}          -> la máquina de la suerte: el SERVIDOR decide si ganas,
 //        cuenta las jugadas del día y entrega un código de descuento único de un solo uso
 //        (tabla milionari_slot_codigos). Variables: SLOT_WIN_CHANCE (% , por defecto 2),
@@ -96,7 +97,21 @@ module.exports = async (req, res) => {
     }
 
     if (action === 'ceo') {
-      if (igual(password, process.env.CEO_PASSWORD)) return res.status(200).json({ success: true });
+      if (igual(password, process.env.CEO_PASSWORD)) {
+        // Si llega la identidad anónima de Firebase del visitante, se marca como CEO en Firebase
+        // (las reglas solo dejan usar el avatar y el nombre FELIX a quien esté en museo/ceo).
+        const uid = String((req.body || {}).uid || '');
+        let firebase = false;
+        if (/^[A-Za-z0-9]{20,40}$/.test(uid) && process.env.FIREBASE_DB_URL && process.env.FIREBASE_DB_SECRET) {
+          try {
+            const url = process.env.FIREBASE_DB_URL.replace(/\/+$/, '') + '/museo/ceo/' + uid + '.json?auth=' + encodeURIComponent(process.env.FIREBASE_DB_SECRET);
+            const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: 'true' });
+            firebase = r.ok;
+            if (!r.ok) console.error('Firebase CEO', r.status, await r.text());
+          } catch (e) { console.error('Firebase CEO', e); }
+        }
+        return res.status(200).json({ success: true, firebase });
+      }
       await espera(700);
       return res.status(200).json({ success: false, error: 'Incorrecta' });
     }
